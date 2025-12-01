@@ -1,0 +1,564 @@
+import flet as ft
+from datetime import datetime
+import random
+import time
+import threading
+import aiohttp
+import asyncio
+import json
+import logging
+
+# ==============================================================================
+# --- GLOBAL CONFIGURATION & DATA STORAGE ---
+# ==============================================================================
+
+# --- LOGGING SETUP (For ThingSpeak) ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- AI CHAT CONFIGURATION ---
+# ATTENTION: REPLACE WITH YOUR NEW API KEY!
+API_KEY = "ITT_A_TE_UJ_AI_KULCSOD" 
+API_URL = "https://openrouter.ai/api/v1/chat/completions"
+MODEL_NAME = "deepseek/deepseek-chat"
+
+# --- THINGSPEAK CONFIGURATION ---
+THINGSPEAK_CHANNEL_ID = "3156213"
+THINGSPEAK_READ_KEY = "WXM1B5P9O2XBKKMS"
+THINGSPEAK_URL = f"https://api.thingspeak.com/channels/{THINGSPEAK_CHANNEL_ID}/feeds/last.json?api_key={THINGSPEAK_READ_KEY}"
+POLL_INTERVAL_SECONDS = 15
+
+# --- THINGSPEAK STYLE CONSTANTS ---
+CHART_BG_COLOR = ft.Colors.WHITE
+GRID_COLOR = ft.Colors.GREY_100
+AXIS_TITLE_COLOR = ft.Colors.GREY_800
+LABEL_COLOR = ft.Colors.GREY_600
+LABEL_STYLE = ft.TextStyle(size=12, weight=ft.FontWeight.W_500, color=LABEL_COLOR)
+AXIS_TITLE_STYLE = ft.TextStyle(size=14, weight=ft.FontWeight.BOLD, color=AXIS_TITLE_COLOR)
+
+# --- GLOBAL DATA STORAGE ---
+GALLERY_DATA = []
+chat_history_for_api = [
+    {"role": "system", "content": "You are a helpful assistant in a smart home monitor application."}
+]
+# Globally store sensor history to persist across navigation
+THINGSPEAK_HISTORY = { "Field1": [], "Field2": [], "Field7": [] }
+
+# --- HELPER FUNCTION: Y-axis labels (for ThingSpeak chart) ---
+def generate_y_labels(min_val, max_val):
+    rng = max_val - min_val
+    if rng <= 20: step = 5
+    elif rng <= 50: step = 10
+    elif rng <= 1000: step = 200
+    else: step = 500
+    labels = []
+    curr = min_val
+    while curr <= max_val:
+        labels.append(ft.ChartAxisLabel(value=curr, label=ft.Text(str(int(curr)), style=LABEL_STYLE)))
+        curr += step
+    return labels
+
+
+# ==============================================================================
+# --- PAGE 1: HOME VIEW (Smart Home Controller) ---
+# ==============================================================================
+def home_view(page: ft.Page):
+    bgcolor = "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+
+    # --- Event Handlers ---
+    def on_light_click(e):
+        if light_button.text == "Turn ON":
+            light_status.value = "Status: ON"; light_status.color = ft.Colors.GREEN
+            light_button.text = "Turn OFF"; light_button.bgcolor = "#FF6B6B"
+            light_card.bgcolor = "#4ECDC4"; light_icon.content = ft.Text("💡", size=28)
+        else:
+            light_status.value = "Status: OFF"; light_status.color = ft.Colors.RED
+            light_button.text = "Turn ON"; light_button.bgcolor = "#4ECDC4"
+            light_card.bgcolor = "#FFD93D"; light_icon.content = ft.Text("💡", size=28)
+        page.update()
+
+    def on_door_click(e):
+        if door_button.text == "Unlock":
+            door_status.value = "Door: UNLOCKED"; door_status.color = ft.Colors.GREEN
+            door_button.text = "Lock"; door_button.bgcolor = "#FF6B6B"
+            door_icon.content = ft.Text("🚪", size=28)
+        else:
+            door_status.value = "Door: LOCKED"; door_status.color = ft.Colors.RED
+            door_button.text = "Unlock"; door_button.bgcolor = "#4ECDC4"
+            door_icon.content = ft.Text("🔒", size=28)
+        page.update()
+
+    def on_fan_click(e):
+        if fan_button.text == "Turn ON":
+            fan_status.value = "Status: ON"; fan_status.color = ft.Colors.GREEN
+            fan_button.text = "Turn OFF"; fan_button.bgcolor = "#FF6B6B"
+            fan_icon.content = ft.Text("🌀", size=28)
+        else:
+            fan_status.value = "Status: OFF"; fan_status.color = ft.Colors.RED
+            fan_button.text = "Turn ON"; fan_button.bgcolor = "#4ECDC4"
+            fan_icon.content = ft.Text("💨", size=28)
+        page.update()
+
+    def on_rain_click(e):
+        if rain_button.text == "Set YES":
+            rain_status.value = "Rain: YES"; rain_status.color = "#4ECDC4"
+            rain_button.text = "Set NO"; rain_button.bgcolor = "#FFD93D"
+            rain_icon.content = ft.Text("🌧️", size=28)
+        else:
+            rain_status.value = "Rain: NO"; rain_status.color = "#FFD93D"
+            rain_button.text = "Set YES"; rain_button.bgcolor = "#4ECDC4"
+            rain_icon.content = ft.Text("☀️", size=28)
+        page.update()
+
+    def on_window_click(e):
+        if window_button.text == "Open":
+            window_status.value = "Window: OPEN"; window_status.color = ft.Colors.GREEN
+            window_button.text = "Close"; window_button.bgcolor = "#FF6B6B"
+            window_icon.content = ft.Text("🪟", size=28)
+        else:
+            window_status.value = "Window: CLOSED"; window_status.color = ft.Colors.RED
+            window_button.text = "Open"; window_button.bgcolor = "#4ECDC4"
+            window_icon.content = ft.Text("🚫", size=28)
+        page.update()
+
+    # --- Card Creator Functions ---
+    def create_sensor_card(title, value, unit, value_color, icon, bg_color, details, width=280, height=200):
+        return ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Container(content=ft.Text(icon, size=24), width=45, height=45, bgcolor=ft.Colors.WHITE, border_radius=10, alignment=ft.alignment.center),
+                    ft.Column([ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE), ft.Text("Real-time sensor", size=10, color=ft.Colors.WHITE70)], spacing=2),
+                ], spacing=12),
+                ft.Container(content=ft.Column([ft.Text(value, size=32, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE), ft.Text(unit, size=14, color=ft.Colors.WHITE70)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), alignment=ft.alignment.center, margin=ft.margin.only(top=10, bottom=10)),
+                ft.Container(content=ft.Column([ft.Text("Sensor Details", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE), ft.Text(details, size=10, color=ft.Colors.WHITE70)]), bgcolor=ft.Colors.WHITE24, padding=8, border_radius=8),
+            ]), bgcolor=bg_color, padding=15, border_radius=20, width=width, height=height,
+        )
+
+    def create_interactive_card(title, status, status_color, icon, bg_color, description, button, width=280, height=200):
+        return ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Container(content=ft.Text(icon, size=24), width=45, height=45, bgcolor=ft.Colors.WHITE, border_radius=10, alignment=ft.alignment.center),
+                    ft.Column([ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE), ft.Text("Smart device", size=10, color=ft.Colors.WHITE70)], spacing=2),
+                ], spacing=12),
+                ft.Column([ft.Text(status, size=18, weight=ft.FontWeight.BOLD, color=status_color), ft.Text(description, size=12, color=ft.Colors.WHITE70)], spacing=5),
+                ft.Container(content=button, alignment=ft.alignment.center, margin=ft.margin.only(top=10)),
+                ft.Container(content=ft.Row([ft.Text("🔄 Auto", size=10, color=ft.Colors.WHITE70), ft.Text("⚡ Low Power", size=10, color=ft.Colors.WHITE70), ft.Text("📱 Connected", size=10, color=ft.Colors.WHITE70)], spacing=8), alignment=ft.alignment.center),
+            ]), bgcolor=bg_color, padding=15, border_radius=20, width=width, height=height,
+        )
+
+    # --- Navigation Buttons ---
+    # MÓDOSÍTVA: A gomb szövege "Go to Sensors (ThingSpeak) 📊"-ről "Go to Simulation 📊"-re változott.
+    go_to_sensors_btn = ft.ElevatedButton("Go to Simulation 📊", on_click=lambda _: page.go("/sensors"), style=ft.ButtonStyle(color=ft.Colors.BLUE_900, bgcolor=ft.Colors.WHITE, padding=20))
+    go_to_extras_btn = ft.ElevatedButton("Go to Extras (Chat/Gallery) 🤖", on_click=lambda _: page.go("/extras"), style=ft.ButtonStyle(color=ft.Colors.PURPLE_900, bgcolor=ft.Colors.WHITE, padding=20))
+
+    header = ft.Container(
+        content=ft.Column([
+            ft.Text("🏠 Smart Home Dashboard", size=28, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+            ft.Text("Real-time monitoring & control system", size=14, color=ft.Colors.WHITE70),
+            ft.Container(height=20),
+            ft.Row([go_to_sensors_btn, go_to_extras_btn], spacing=20, alignment=ft.MainAxisAlignment.CENTER)
+        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+        margin=ft.margin.only(bottom=30),
+    )
+
+    # --- Cards ---
+    temp_card = create_sensor_card("Temperature", "22.5", "°C", ft.Colors.WHITE, "🌡️", "#FF6B6B", "DHT22 Sensor\nRange: -40°C to 80°C")
+    humidity_card = create_sensor_card("Humidity", "45", "% RH", ft.Colors.WHITE, "💧", "#4ECDC4", "DHT22 Sensor\nRange: 0-100% RH")
+
+    light_status = ft.Text("Status: OFF", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.RED)
+    light_button = ft.ElevatedButton("Turn ON", on_click=on_light_click, style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.GREEN, padding=15, shape=ft.RoundedRectangleBorder(radius=12)), width=120)
+    light_icon = ft.Container(content=ft.Text("💡", size=24), width=45, height=45, bgcolor=ft.Colors.WHITE, border_radius=10, alignment=ft.alignment.center)
+    light_card = create_interactive_card("Light", "650 Lux", ft.Colors.AMBER, "💡", "#FFD93D", "BH1750 Light Sensor", light_button)
+
+    fan_status = ft.Text("Status: OFF", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.RED)
+    fan_button = ft.ElevatedButton("Turn ON", on_click=on_fan_click, style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.GREEN, padding=15, shape=ft.RoundedRectangleBorder(radius=12)), width=120)
+    fan_icon = ft.Container(content=ft.Text("💨", size=24), width=45, height=45, bgcolor=ft.Colors.WHITE, border_radius=10, alignment=ft.alignment.center)
+    fan_card = create_interactive_card("Fan", "Status: OFF", ft.Colors.RED, "💨", "#FF9FF3", "DC Motor Fan Control", fan_button)
+
+    rain_status = ft.Text("Rain: NO", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE)
+    rain_button = ft.ElevatedButton("Set YES", on_click=on_rain_click, style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.BLUE, padding=15, shape=ft.RoundedRectangleBorder(radius=12)), width=120)
+    rain_icon = ft.Container(content=ft.Text("☀️", size=24), width=45, height=45, bgcolor=ft.Colors.WHITE, border_radius=10, alignment=ft.alignment.center)
+    rain_card = create_interactive_card("Rain Detection", "Rain: NO", ft.Colors.ORANGE, "☀️", "#54A0FF", "Rain Sensor Module", rain_button)
+
+    window_status = ft.Text("Window: CLOSED", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.RED)
+    window_button = ft.ElevatedButton("Open", on_click=on_window_click, style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.GREEN, padding=15, shape=ft.RoundedRectangleBorder(radius=12)), width=120)
+    window_icon = ft.Container(content=ft.Text("🚫", size=24), width=45, height=45, bgcolor=ft.Colors.WHITE, border_radius=10, alignment=ft.alignment.center)
+    window_card = create_interactive_card("Window", "Window: CLOSED", ft.Colors.RED, "🚫", "#FF9F43", "Smart Window Controller", window_button)
+
+    door_status = ft.Text("Door: LOCKED", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.RED)
+    door_button = ft.ElevatedButton("Unlock", on_click=on_door_click, style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.BLUE, padding=15, shape=ft.RoundedRectangleBorder(radius=12)), width=120)
+    door_icon = ft.Container(content=ft.Text("🔒", size=24), width=45, height=45, bgcolor=ft.Colors.WHITE, border_radius=10, alignment=ft.alignment.center)
+    door_card = create_interactive_card("Front Door", "Door: LOCKED", ft.Colors.RED, "🔒", "#48DBFB", "Smart Lock System", door_button)
+
+    # --- Layout ---
+    first_row = ft.Row([temp_card, humidity_card, light_card], spacing=20, wrap=True, alignment=ft.MainAxisAlignment.SPACE_EVENLY)
+    second_row = ft.Row([fan_card, rain_card, window_card, door_card], spacing=20, wrap=True, alignment=ft.MainAxisAlignment.SPACE_EVENLY)
+
+    content_column = ft.Column([header, ft.Container(height=10), first_row, ft.Container(height=20), second_row], scroll=ft.ScrollMode.ADAPTIVE, spacing=0, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+
+    return ft.View(route="/", controls=[content_column], bgcolor=bgcolor, padding=25, scroll=ft.ScrollMode.ADAPTIVE)
+
+
+# ==============================================================================
+# --- PAGE 2: SENSOR MONITOR (REAL THINGSPEAK DATA) ---
+# ==============================================================================
+def sensor_view(page: ft.Page):
+    logger.info("Sensor view loading...")
+    bgcolor = "#F5F7F9"
+
+    # --- Local State Variables ---
+    current_chart_field = "Field1"
+    # Polling control variables
+    polling_state = {"is_running": False}
+    poller_task = None
+
+    # --- Sensor Configuration ---
+    field_configs = {
+        "Field1": { "name": "Temperature", "color": ft.Colors.BLUE, "icon": ft.Icons.THERMOSTAT, "min_y": 15, "max_y": 35 },
+        "Field2": { "name": "Humidity", "color": ft.Colors.TEAL, "icon": ft.Icons.WATER_DROP, "min_y": 30, "max_y": 80 },
+        "Field7": { "name": "Light", "color": ft.Colors.AMBER, "icon": ft.Icons.LIGHT_MODE, "min_y": 0, "max_y": 1000 },
+    }
+
+    # --- 1. UI Elements: Cards ---
+    temp_value = ft.Text("—", size=28, weight=ft.FontWeight.BOLD)
+    temp_ts = ft.Text("Waiting...", size=12, color=ft.Colors.GREY_500)
+    hum_value = ft.Text("—", size=28, weight=ft.FontWeight.BOLD)
+    hum_ts = ft.Text("", size=12, color=ft.Colors.GREY_500)
+    light_value = ft.Text("—", size=28, weight=ft.FontWeight.BOLD)
+    light_ts = ft.Text("", size=12, color=ft.Colors.GREY_500)
+
+    # Card click handler (Switch chart)
+    def on_card_clicked(e, field_id):
+        nonlocal current_chart_field
+        current_chart_field = field_id
+        config = field_configs[field_id]
+        
+        chart_axis_title.value = f"{config['name']} History"
+        main_chart_series.color = config['color']
+        main_chart_series.below_line_bgcolor = ft.Colors.with_opacity(0.1, config['color'])
+        
+        main_chart.min_y = config["min_y"]
+        main_chart.max_y = config["max_y"]
+        main_chart.left_axis.labels = generate_y_labels(config["min_y"], config["max_y"])
+
+        # Load data from global history
+        main_chart_series.data_points = list(THINGSPEAK_HISTORY[field_id])
+        page.update()
+
+    # Sensor card creator function
+    def sensor_card(title: str, big_text: ft.Text, ts_text: ft.Text, unit_hint: str, field_id: str):
+        config = field_configs[field_id]
+        return ft.Card(
+            elevation=2, color=ft.Colors.WHITE,
+            content=ft.Container(
+                on_click=lambda e: on_card_clicked(e, field_id),
+                padding=20, ink=True, border_radius=12,
+                content=ft.Column([
+                        ft.Row([
+                            ft.Container(content=ft.Icon(config['icon'], color=config['color']), padding=8, bgcolor=ft.Colors.with_opacity(0.1, config['color']), border_radius=8),
+                            ft.Text(title, size=16, weight=ft.FontWeight.W_600, color=AXIS_TITLE_COLOR)
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                        ft.Container(height=10),
+                        big_text,
+                        ft.Row([ft.Text(unit_hint, size=12, color=LABEL_COLOR), ts_text], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ], spacing=0),
+            )
+        )
+
+    # --- 2. UI Elements: Data Table ---
+    table = ft.DataTable(
+        columns=[
+            ft.DataColumn(ft.Text("Time", weight=ft.FontWeight.BOLD, color=AXIS_TITLE_COLOR)),
+            ft.DataColumn(ft.Text("Sensor", weight=ft.FontWeight.BOLD, color=AXIS_TITLE_COLOR)),
+            ft.DataColumn(ft.Text("Value", weight=ft.FontWeight.BOLD, color=AXIS_TITLE_COLOR)),
+            ft.DataColumn(ft.Text("Unit", weight=ft.FontWeight.BOLD, color=AXIS_TITLE_COLOR))
+        ],
+        rows=[],
+        heading_row_color=ft.Colors.GREY_50, heading_row_height=40, data_row_min_height=35,
+        border=ft.border.all(1, ft.Colors.GREY_200), border_radius=8,
+        vertical_lines=ft.border.BorderSide(0, ft.Colors.TRANSPARENT), horizontal_lines=ft.border.BorderSide(1, ft.Colors.GREY_100),
+    )
+    table_container = ft.Container(
+        content=ft.Column([table], scroll=ft.ScrollMode.AUTO),
+        height=300, bgcolor=ft.Colors.WHITE, border_radius=12, padding=0,
+        border=ft.border.all(1, ft.Colors.GREY_200)
+    )
+
+    # --- 3. UI Elements: Chart ---
+    initial_config = field_configs[current_chart_field]
+    # Initialize with global history
+    main_chart_series = ft.LineChartData(
+        data_points=list(THINGSPEAK_HISTORY[current_chart_field]),
+        stroke_width=3, color=initial_config['color'],
+        curved=True, stroke_cap_round=True,
+        below_line_bgcolor=ft.Colors.with_opacity(0.1, initial_config['color']),
+    )
+    
+    chart_axis_title = ft.Text(f"{initial_config['name']} History", style=AXIS_TITLE_STYLE)
+    chart_grid_lines = ft.ChartGridLines(interval=1, color=GRID_COLOR, width=1, dash_pattern=[5, 5])
+    initial_y_labels = generate_y_labels(initial_config["min_y"], initial_config["max_y"])
+    x_labels = [ft.ChartAxisLabel(value=i, label=ft.Text(str(i), style=LABEL_STYLE)) for i in range(10)]
+
+    main_chart = ft.LineChart(
+        data_series=[main_chart_series],
+        min_x=0, max_x=9,
+        min_y=initial_config["min_y"], max_y=initial_config["max_y"],
+        interactive=True, expand=True,
+        left_axis=ft.ChartAxis(title=chart_axis_title, labels=initial_y_labels, labels_size=40),
+        bottom_axis=ft.ChartAxis(title=ft.Text("Last 10 Readings Index", style=AXIS_TITLE_STYLE), labels=x_labels, labels_interval=1),
+        horizontal_grid_lines=chart_grid_lines, vertical_grid_lines=chart_grid_lines,
+        bgcolor=CHART_BG_COLOR, border=ft.border.all(0, ft.Colors.TRANSPARENT),
+        tooltip_bgcolor=ft.Colors.with_opacity(0.9, ft.Colors.WHITE),
+    )
+    
+    chart_container = ft.Container(
+        content=main_chart, height=400, padding=ft.padding.all(20), bgcolor=ft.Colors.WHITE,
+        border_radius=16, expand=True, border=ft.border.all(1, ft.Colors.GREY_200)
+    )
+
+    # --- 4. UI Elements: Buttons & Layout ---
+    start_btn = ft.ElevatedButton("Start polling API", icon=ft.Icons.CLOUD_DOWNLOAD, style=ft.ButtonStyle(padding=15, shape=ft.RoundedRectangleBorder(radius=10)))
+    stop_btn = ft.OutlinedButton("Stop", icon=ft.Icons.STOP, disabled=True, style=ft.ButtonStyle(padding=15, shape=ft.RoundedRectangleBorder(radius=10)))
+    status_indicator = ft.Icon(ft.Icons.CIRCLE, color=ft.Colors.GREY_300, size=12)
+    status_text = ft.Text("API Poller: idle", color=LABEL_COLOR)
+
+    # Back button to Home (IMPORTANT: Stop poller!)
+    def on_home_click(e):
+        stop_polling(None) # Stop polling before navigation
+        page.go("/")
+
+    home_btn = ft.ElevatedButton("🏠 HOME", on_click=on_home_click, bgcolor=ft.Colors.ORANGE, color=ft.Colors.WHITE)
+
+    header = ft.Row([home_btn, ft.Text(" ThingSpeak Sensor Monitor", size=24, weight=ft.FontWeight.BOLD, color=AXIS_TITLE_COLOR)], alignment=ft.MainAxisAlignment.START)
+
+    col1 = ft.Column(
+        [
+            ft.Text("Dashboard Overview", size=20, weight=ft.FontWeight.BOLD, color=AXIS_TITLE_COLOR),
+            ft.Row(
+                [
+                    sensor_card("Temp (F1)", temp_value, temp_ts, "°C", "Field1"),
+                    sensor_card("Humidity (F2)", hum_value, hum_ts, "%RH", "Field2"),
+                    sensor_card("Light (F7)", light_value, light_ts, "Lux", "Field7"),
+                ],
+                spacing=15, wrap=True,
+            ),
+            ft.Container(height=10),
+            ft.Row([start_btn, stop_btn, ft.Container(width=10), status_indicator, status_text], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Container(height=10),
+            ft.Text("Recent Activity Log", size=18, weight=ft.FontWeight.W_600, color=AXIS_TITLE_COLOR),
+            table_container,
+        ], spacing=10, expand=2,
+    )
+
+    col2 = ft.Column(
+        [
+            ft.Text("Sensor History Analysis", size=20, weight=ft.FontWeight.W_600, color=AXIS_TITLE_COLOR),
+            chart_container,
+        ], spacing=10, expand=3,
+    )
+
+    main_layout = ft.Column([
+        header,
+        ft.Divider(),
+        ft.Row([col1, ft.Container(width=20), col2], expand=True, alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.VerticalAlignment.START)
+    ], expand=True)
+
+
+    # --- 5. LOGIC: PubSub Subscriber (Data Reception) ---
+    def on_message(msg):
+        if not isinstance(msg, dict) or msg.get("type") != "sensor": return
+        name = msg["name"]; value = msg["value"]; unit = msg["unit"]; ts_raw = msg["ts"]
+        try:
+            dt_obj = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+            ts_formatted = dt_obj.strftime("%H:%M:%S")
+        except (ValueError, TypeError): ts_formatted = "N/A"
+
+        # Update Cards
+        if name == "Field1": temp_value.value = f"{value} {unit}"; temp_ts.value = ts_formatted
+        elif name == "Field2": hum_value.value = f"{value} {unit}"; hum_ts.value = ts_formatted
+        elif name == "Field7": light_value.value = f"{value} {unit}"; light_ts.value = ts_formatted
+
+        # Save data to GLOBAL history and update chart
+        try:
+            float_val = float(value)
+            if name in THINGSPEAK_HISTORY:
+                target_history = THINGSPEAK_HISTORY[name]
+                target_history.append(ft.LineChartDataPoint(len(target_history), float_val))
+                if len(target_history) > 10:
+                    target_history.pop(0)
+                    for i, p in enumerate(target_history): p.x = i
+                if name == current_chart_field:
+                    main_chart_series.data_points = list(target_history)
+        except (ValueError, TypeError): pass
+
+        # Update Log Table
+        table.rows.insert(0, ft.DataRow([ft.DataCell(ft.Text(ts_formatted, color=LABEL_COLOR)), ft.DataCell(ft.Text(name, weight=ft.FontWeight.W_500)), ft.DataCell(ft.Text(str(value), weight=ft.FontWeight.BOLD)), ft.DataCell(ft.Text(unit, color=LABEL_COLOR))]))
+        if len(table.rows) > 100: table.rows.pop()
+        if page: page.update()
+
+    # Subscribe to channel
+    page.pubsub.subscribe(on_message)
+
+    # --- 6. LOGIC: ThingSpeak API Poller (Data Fetching) ---
+    async def thingspeak_poller_loop():
+        status_text.value = f"Polling ({POLL_INTERVAL_SECONDS}s)..."; status_indicator.color = ft.Colors.AMBER; page.update()
+        async with aiohttp.ClientSession() as session:
+            while polling_state["is_running"]:
+                try:
+                    async with session.get(THINGSPEAK_URL, timeout=10) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            status_text.value = "Online"; status_indicator.color = ft.Colors.GREEN; page.update()
+                            ts = data.get("created_at")
+                            f1 = data.get("field1"); f2 = data.get("field2"); f7 = data.get("field7")
+                            if f1: page.pubsub.send_all({"type": "sensor", "name": "Field1", "value": f1, "unit": "°C", "ts": ts})
+                            if f2: page.pubsub.send_all({"type": "sensor", "name": "Field2", "value": f2, "unit": "%RH", "ts": ts})
+                            if f7: page.pubsub.send_all({"type": "sensor", "name": "Field7", "value": f7, "unit": "Lux", "ts": ts})
+                        else: status_text.value = f"Error: {response.status}"; status_indicator.color = ft.Colors.RED; page.update()
+                except Exception: status_text.value = "Connection Error"; status_indicator.color = ft.Colors.RED; page.update()
+                if polling_state["is_running"]: await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+    def start_polling(_):
+        if polling_state["is_running"]: return
+        polling_state["is_running"] = True; nonlocal poller_task; poller_task = page.run_task(thingspeak_poller_loop)
+        start_btn.disabled = True; stop_btn.disabled = False; page.update()
+
+    def stop_polling(_):
+        polling_state["is_running"] = False;
+        if poller_task: poller_task.cancel()
+        status_text.value = "Stopped"; status_indicator.color = ft.Colors.GREY_300; start_btn.disabled = False; stop_btn.disabled = True; page.update()
+
+    start_btn.on_click = start_polling; stop_btn.on_click = stop_polling
+
+    # Return the view
+    return ft.View(route="/sensors", controls=[main_layout], bgcolor=bgcolor, padding=20, scroll=ft.ScrollMode.ADAPTIVE)
+
+
+# ==============================================================================
+# --- PAGE 3: EXTRAS VIEW (Gallery & AI Chat) ---
+# ==============================================================================
+def extras_view(page: ft.Page):
+    bgcolor = ft.Colors.WHITE
+
+    # --- TAB 1: PLANT GALLERY ---
+    gallery_grid = ft.GridView(expand=True, runs_count=3, max_extent=300, child_aspect_ratio=0.8, spacing=20, run_spacing=20)
+
+    def delete_image(item_to_delete):
+        if item_to_delete in GALLERY_DATA:
+            GALLERY_DATA.remove(item_to_delete)
+            update_gallery_ui()
+            page.show_snack_bar(ft.SnackBar(ft.Text("Kép törölve!"), bgcolor=ft.Colors.RED_700))
+
+    def update_gallery_ui():
+        gallery_grid.controls.clear()
+        for item in GALLERY_DATA:
+            path = item["path"]; date_str = item["date"]
+            date_text = ft.Text(date_str, size=12, color=ft.Colors.GREY_700, weight="bold")
+            delete_btn = ft.IconButton(icon=ft.Icons.DELETE_OUTLINE, icon_color=ft.Colors.RED_400, tooltip="Kép törlése", on_click=lambda e, current_item=item: delete_image(current_item))
+            footer_row = ft.Row([date_text, delete_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            gallery_item = ft.Card(elevation=4, content=ft.Container(padding=10, content=ft.Column([ft.Image(src=path, width=float("inf"), height=200, fit=ft.ImageFit.COVER, border_radius=8), ft.Container(content=footer_row, padding=ft.padding.only(top=5))], spacing=5)))
+            gallery_grid.controls.append(gallery_item)
+        if not GALLERY_DATA:
+            gallery_grid.controls.append(ft.Container(content=ft.Text("Még nincsenek feltöltött képek.", color=ft.Colors.GREY_400), alignment=ft.alignment.center, padding=50))
+        if page: page.update()
+
+    def on_file_picked(e: ft.FilePickerResultEvent):
+        if e.files and len(e.files) > 0:
+            file_path = e.files[0].path; formatted_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+            GALLERY_DATA.insert(0, {"path": file_path, "date": formatted_date})
+            update_gallery_ui()
+            page.show_snack_bar(ft.SnackBar(ft.Text(f"Kép sikeresen hozzáadva!"), bgcolor=ft.Colors.GREEN_700))
+
+    file_picker = ft.FilePicker(on_result=on_file_picked)
+    page.overlay.append(file_picker)
+
+    upload_btn = ft.ElevatedButton("Új fotó", icon=ft.Icons.ADD_A_PHOTO, style=ft.ButtonStyle(padding=15, shape=ft.RoundedRectangleBorder(radius=10), bgcolor=ft.Colors.GREEN, color=ft.Colors.WHITE), on_click=lambda _: file_picker.pick_files(allow_multiple=False, file_type=ft.FilePickerFileType.IMAGE))
+
+    gallery_tab_content = ft.Column([ft.Row([ft.Text("🌱 Növény Napló", size=24, weight="bold", color=ft.Colors.GREEN_800), upload_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN), ft.Divider(), gallery_grid], expand=True)
+
+    # --- TAB 2: AI CHATBOX ---
+    chat_messages_list = ft.ListView(expand=True, spacing=10, padding=10, auto_scroll=True)
+    chat_input = ft.TextField(hint_text="Írj valamit az AI-nak...", expand=True, border_radius=20, bgcolor=ft.Colors.WHITE, on_submit=lambda e: send_message_click(e))
+    send_button = ft.IconButton(icon=ft.Icons.SEND_ROUNDED, icon_color=ft.Colors.BLUE_600, tooltip="Küldés", on_click=lambda e: send_message_click(e))
+
+    def create_message_bubble(text, is_user):
+        return ft.Row(alignment=ft.MainAxisAlignment.END if is_user else ft.MainAxisAlignment.START, controls=[ft.Container(content=ft.Text(text, color=ft.Colors.WHITE if is_user else ft.Colors.BLACK), padding=15, border_radius=ft.border_radius.only(top_left=15, top_right=15, bottom_left=15 if is_user else 0, bottom_right=0 if is_user else 15), bgcolor=ft.Colors.BLUE_600 if is_user else ft.Colors.GREY_200, width=page.width * 0.7)])
+
+    async def get_ai_response_async(prompt):
+        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json", "HTTP-Referer": "https://flet.dev", "X-Title": "Flet Smart Home App"}
+        chat_history_for_api.append({"role": "user", "content": prompt})
+        payload = {"model": MODEL_NAME, "messages": chat_history_for_api, "temperature": 0.7}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(API_URL, headers=headers, json=payload) as response:
+                    if response.status == 200:
+                        data = await response.json(); ai_message_content = data['choices'][0]['message']['content']
+                        chat_history_for_api.append({"role": "assistant", "content": ai_message_content})
+                        return ai_message_content
+                    else: error_text = await response.text(); return f"Hiba az API hívásnál: {response.status} - {error_text}"
+        except Exception as e: return f"Kapcsolódási hiba: {str(e)}"
+
+    def send_message_click(e):
+        user_message = chat_input.value
+        if not user_message: return
+        chat_messages_list.controls.append(create_message_bubble(user_message, is_user=True))
+        chat_input.value = ""; chat_input.disabled = True; send_button.disabled = True; page.update()
+        typing_indicator = ft.Text("Az AI gondolkodik...", italic=True, color=ft.Colors.GREY_500)
+        chat_messages_list.controls.append(typing_indicator); page.update()
+        async def process_ai_response():
+            response_text = await get_ai_response_async(user_message)
+            chat_messages_list.controls.remove(typing_indicator)
+            chat_messages_list.controls.append(create_message_bubble(response_text, is_user=False))
+            chat_input.disabled = False; send_button.disabled = False; chat_input.focus(); page.update()
+        page.run_task(process_ai_response)
+
+    chat_tab_content = ft.Column(controls=[ft.Text("💬 DeepSeek AI Chat", size=24, weight="bold", color=ft.Colors.BLUE_800), ft.Divider(), ft.Container(content=chat_messages_list, expand=True, bgcolor=ft.Colors.GREY_50, border_radius=10, border=ft.border.all(1, ft.Colors.GREY_200)), ft.Row([chat_input, send_button], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)], expand=True)
+
+    # --- TAB ASSEMBLY ---
+    if len(chat_messages_list.controls) == 0:
+         chat_messages_list.controls.append(create_message_bubble("Szia! Én vagyok az okosotthonod AI asszisztense. Miben segíthetek?", is_user=False))
+
+    tabs = ft.Tabs(selected_index=0, animation_duration=300, tabs=[
+        ft.Tab(text="Növény Napló (Gallery)", icon=ft.Icons.IMAGE, content=ft.Container(content=gallery_tab_content, padding=10)),
+        ft.Tab(text="AI Chat", icon=ft.Icons.CHAT_BUBBLE, content=ft.Container(content=chat_tab_content, padding=10)),
+    ], expand=True)
+
+    home_btn = ft.ElevatedButton("🏠 HOME", on_click=lambda _: page.go("/"), bgcolor=ft.Colors.ORANGE, color=ft.Colors.WHITE)
+    
+    main_column = ft.Column([ft.Row([home_btn], alignment=ft.MainAxisAlignment.START), tabs], expand=True)
+
+    update_gallery_ui()
+    return ft.View(route="/extras", controls=[main_column], bgcolor=bgcolor, padding=20, scroll=ft.ScrollMode.ADAPTIVE)
+
+
+# ==============================================================================
+# --- MAIN APPLICATION LOGIC & ROUTING ---
+# ==============================================================================
+def main(page: ft.Page):
+    page.title = "Smart Home Super App"
+    
+    # Route Change Handler
+    def route_change(route):
+        page.views.clear()
+        if page.route == "/":
+            page.views.append(home_view(page))
+        elif page.route == "/sensors":
+            page.views.append(sensor_view(page))
+        elif page.route == "/extras":
+            page.views.append(extras_view(page))
+        page.update()
+
+    # View Pop Handler
+    def view_pop(view):
+        page.views.pop()
+        top_view = page.views[-1]
+        page.go(top_view.route)
+
+    page.on_route_change = route_change
+    page.on_view_pop = view_pop
+    
+    # Start at Home
+    page.go("/")
+
+ft.app(target=main)

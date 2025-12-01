@@ -8,6 +8,7 @@ def main(page: ft.Page):
     page.title = "Sensor Monitor Dashboard - Real Time"
     page.padding = 25
     page.bgcolor = ft.Colors.BLUE_900
+    page.scroll = ft.ScrollMode.ADAPTIVE  # Enable page scrolling
     
     # Real-time data storage
     sensor_data = [
@@ -34,7 +35,7 @@ def main(page: ft.Page):
     is_running = True
     update_thread = None
     
-    # Create metric card
+    # Create larger metric card
     def create_metric_card(sensor_type):
         color_info = sensor_colors[sensor_type]
         return ft.Container(
@@ -43,32 +44,32 @@ def main(page: ft.Page):
                     ft.Row(
                         [
                             ft.Container(
-                                content=ft.Text(color_info["icon"], size=28),
-                                width=50,
-                                height=50,
+                                content=ft.Text(color_info["icon"], size=32),  # Larger icon
+                                width=60,  # Larger container
+                                height=60,
                                 bgcolor=ft.Colors.WHITE,
-                                border_radius=12,
+                                border_radius=15,
                                 alignment=ft.alignment.center,
                             ),
                             ft.Column([
-                                ft.Text(color_info["name"], size=16, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD),
-                                ft.Text(f"Updated: --:--:--", size=10, color=ft.Colors.WHITE54),
-                            ], spacing=2),
+                                ft.Text(color_info["name"], size=18, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD),  # Larger text
+                                ft.Text(f"Updated: --:--:--", size=12, color=ft.Colors.WHITE54),
+                            ], spacing=3),
                         ],
-                        spacing=12,
+                        spacing=15,
                     ),
-                    ft.Container(height=10),
-                    ft.Text("--", size=36, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
-                    ft.Text("", size=14, color=ft.Colors.WHITE54),
+                    ft.Container(height=15),
+                    ft.Text("--", size=42, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),  # Larger value
+                    ft.Text("", size=16, color=ft.Colors.WHITE54),  # Larger unit
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.START,
-                spacing=8,
+                spacing=10,
             ),
             bgcolor=color_info["color"],
-            padding=20,
-            border_radius=20,
-            width=180,
-            height=180,
+            padding=25,  # More padding
+            border_radius=25,
+            width=220,  # Wider card
+            height=220,  # Taller card
         )
     
     # Create cards
@@ -86,10 +87,10 @@ def main(page: ft.Page):
     # Data table
     data_table = ft.DataTable(
         columns=[
-            ft.DataColumn(ft.Text("Time", weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLACK)),
-            ft.DataColumn(ft.Text("Sensor", weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLACK)),
-            ft.DataColumn(ft.Text("Value", weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLACK)),  # Fixed: BLACK instead of BLOCK
-            ft.DataColumn(ft.Text("Unit", weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLACK)),
+            ft.DataColumn(ft.Text("Time", weight=ft.FontWeight.BOLD, size=14, color=ft.Colors.BLACK)),
+            ft.DataColumn(ft.Text("Sensor", weight=ft.FontWeight.BOLD, size=14, color=ft.Colors.BLACK)),
+            ft.DataColumn(ft.Text("Value", weight=ft.FontWeight.BOLD, size=14, color=ft.Colors.BLACK)),
+            ft.DataColumn(ft.Text("Unit", weight=ft.FontWeight.BOLD, size=14, color=ft.Colors.BLACK)),
         ],
         rows=[],
         border=ft.border.all(1, ft.Colors.GREY_300),
@@ -113,26 +114,26 @@ def main(page: ft.Page):
         # Clear existing rows
         data_table.rows.clear()
         
-        # Add latest 6 entries (show most recent first)
-        recent_data = sensor_data[-6:][::-1]
+        # Add latest 8 entries (show most recent first)
+        recent_data = sensor_data[-8:][::-1]
         
         for data in recent_data:
             color_info = sensor_colors[data["sensor"]]
             data_table.rows.append(
                 ft.DataRow(
                     cells=[
-                        ft.DataCell(ft.Text(data["time"], size=12, weight=ft.FontWeight.BOLD)),
+                        ft.DataCell(ft.Text(data["time"], size=13, weight=ft.FontWeight.BOLD)),
                         ft.DataCell(
                             ft.Container(
                                 content=ft.Row([
-                                    ft.Text(color_info["icon"], size=14),
-                                    ft.Text(data["sensor"].upper(), size=12, weight=ft.FontWeight.BOLD),
-                                ], spacing=5),
-                                padding=5,
+                                    ft.Text(color_info["icon"], size=16),  # Larger icon
+                                    ft.Text(data["sensor"].upper(), size=13, weight=ft.FontWeight.BOLD),
+                                ], spacing=8),  # More spacing
+                                padding=8,
                             )
                         ),
-                        ft.DataCell(ft.Text(data["value"], size=14, weight=ft.FontWeight.BOLD)),
-                        ft.DataCell(ft.Text(data["unit"], size=12, color=ft.Colors.GREY_600)),
+                        ft.DataCell(ft.Text(data["value"], size=15, weight=ft.FontWeight.BOLD)),  # Larger text
+                        ft.DataCell(ft.Text(data["unit"], size=13, color=ft.Colors.GREY_600)),
                     ]
                 )
             )
@@ -209,15 +210,15 @@ def main(page: ft.Page):
     
     # Control Panel
     status_indicator = ft.Container(
-        width=12,
-        height=12,
-        border_radius=6,
+        width=15,  # Larger indicator
+        height=15,
+        border_radius=8,
         bgcolor=ft.Colors.GREEN,
     )
     
     status_text = ft.Text(
         "Simulator: RUNNING",
-        size=14,
+        size=16,  # Larger text
         color=ft.Colors.WHITE,
         weight=ft.FontWeight.BOLD,
     )
@@ -230,10 +231,10 @@ def main(page: ft.Page):
         style=ft.ButtonStyle(
             color=ft.Colors.WHITE,
             bgcolor=ft.Colors.GREEN,
-            padding=20,
-            shape=ft.RoundedRectangleBorder(radius=12),
+            padding=25,  # More padding
+            shape=ft.RoundedRectangleBorder(radius=15),
         ),
-        height=50,
+        height=55,  # Taller button
     )
     
     stop_btn = ft.ElevatedButton(
@@ -243,38 +244,38 @@ def main(page: ft.Page):
         style=ft.ButtonStyle(
             color=ft.Colors.WHITE,
             bgcolor=ft.Colors.RED,
-            padding=20,
-            shape=ft.RoundedRectangleBorder(radius=12),
+            padding=25,
+            shape=ft.RoundedRectangleBorder(radius=15),
         ),
-        height=50,
+        height=55,
     )
     
     controls_card = ft.Container(
         content=ft.Column(
             [
                 ft.Text("Simulation Controls", 
-                       size=18, 
+                       size=20,  # Larger text
                        weight=ft.FontWeight.BOLD,
                        color=ft.Colors.WHITE),
-                ft.Container(height=15),
+                ft.Container(height=20),  # More spacing
                 ft.Row(
                     [start_btn, stop_btn],
-                    spacing=15,
+                    spacing=20,  # More spacing between buttons
                     alignment=ft.MainAxisAlignment.CENTER,
                 ),
-                ft.Container(height=15),
+                ft.Container(height=20),
                 ft.Row(
                     [status_indicator, status_text],
-                    spacing=10,
+                    spacing=12,  # More spacing
                     alignment=ft.MainAxisAlignment.CENTER,
                 ),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         bgcolor=ft.Colors.BLUE_700,
-        padding=25,
-        border_radius=20,
-        margin=ft.margin.symmetric(vertical=20),
+        padding=30,  # More padding
+        border_radius=25,
+        margin=ft.margin.symmetric(vertical=25),
     )
     
     # Header Section
@@ -284,27 +285,28 @@ def main(page: ft.Page):
                 ft.IconButton(
                     icon=ft.Icons.ARROW_BACK,
                     icon_color=ft.Colors.WHITE,
+                    icon_size=28,  # Larger icon
                     on_click=lambda e: print("Back clicked"),
                 ),
                 ft.Column([
                     ft.Text("Real-Time Sensor Monitor", 
-                           size=24, 
+                           size=26,  # Larger title
                            weight=ft.FontWeight.BOLD,
                            color=ft.Colors.WHITE),
                     ft.Text("Live IoT Sensor Data Stream", 
-                           size=14, 
+                           size=16,  # Larger subtitle
                            color=ft.Colors.WHITE54),
-                ], spacing=2),
+                ], spacing=5),
                 ft.Container(expand=True),
             ],
             alignment=ft.MainAxisAlignment.START,
         ),
-        margin=ft.margin.only(bottom=30),
+        margin=ft.margin.only(bottom=35),
     )
     
     metrics_row = ft.Row(
         [temp_card, humidity_card, light_card],
-        spacing=20,
+        spacing=25,  # More spacing between cards
         alignment=ft.MainAxisAlignment.CENTER,
         wrap=True,
     )
@@ -313,22 +315,22 @@ def main(page: ft.Page):
         content=ft.Column(
             [
                 ft.Row([
-                    ft.Icon(ft.Icons.TABLE_CHART, color=ft.Colors.WHITE),
+                    ft.Icon(ft.Icons.TABLE_CHART, color=ft.Colors.WHITE, size=28),  # Larger icon
                     ft.Text("Live Sensor Data Stream", 
-                           size=18, 
+                           size=20,  # Larger text
                            weight=ft.FontWeight.BOLD,
                            color=ft.Colors.WHITE),
-                ], spacing=10),
-                ft.Container(height=10),
+                ], spacing=12),
+                ft.Container(height=15),
                 ft.Container(
                     content=data_table,
                     bgcolor=ft.Colors.WHITE,
-                    padding=15,
-                    border_radius=15,
+                    padding=20,  # More padding
+                    border_radius=20,
                 ),
             ]
         ),
-        margin=ft.margin.only(bottom=20),
+        margin=ft.margin.only(bottom=25),
     )
     
     # Home Button
@@ -337,8 +339,8 @@ def main(page: ft.Page):
         on_click=on_home_click,
         bgcolor=ft.Colors.ORANGE,
         color=ft.Colors.WHITE,
-        width=200,
-        height=50,
+        width=220,  # Wider button
+        height=55,  # Taller button
         style=ft.ButtonStyle(
             shape=ft.RoundedRectangleBorder(radius=15),
         ),
@@ -351,20 +353,29 @@ def main(page: ft.Page):
     update_thread = threading.Thread(target=simulate_sensor_data, daemon=True)
     update_thread.start()
     
-    # Main layout
+    # Main layout with scrollable column
+    main_column = ft.Column(
+        [
+            header,
+            metrics_row,
+            controls_card,
+            data_table_container,
+            ft.Container(
+                content=home_btn,
+                alignment=ft.alignment.center,
+                margin=ft.margin.only(bottom=20),
+            ),
+        ],
+        scroll=ft.ScrollMode.ADAPTIVE,  # Enable scrolling for the column
+        expand=True,  # Allow column to expand
+        spacing=0,
+    )
+    
+    # Add to page with scroll container
     page.add(
-        ft.Column(
-            [
-                header,
-                metrics_row,
-                controls_card,
-                data_table_container,
-                ft.Container(
-                    content=home_btn,
-                    alignment=ft.alignment.center,
-                ),
-            ],
-            scroll=ft.ScrollMode.ADAPTIVE,
+        ft.Container(
+            content=main_column,
+            expand=True,  # Expand to fill available space
         )
     )
 

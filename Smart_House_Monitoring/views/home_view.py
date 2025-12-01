@@ -3,6 +3,7 @@ from config import *
 
 def home_view(page: ft.Page):
     
+    
     # --- Event Handlers ---
     def on_light_click(e):
         if light_button.text == "Turn ON":
@@ -65,6 +66,14 @@ def home_view(page: ft.Page):
             window_icon.color = COLOR_HUM
         page.update()
 
+    def on_tempslider_change(e):
+        #nonlocal target_temp
+        up_temp = round(float(e.control.value), 1)
+        target_temp.value = f"{up_temp} Celsius" #I forgot where the degree symbol is
+        page.update()
+
+
+
     # --- UI Card Creators ---
     def create_sensor_card(title, value, unit, accent_color, icon_data, details, width=300):
         return ft.Card(
@@ -126,6 +135,47 @@ def home_view(page: ft.Page):
             )
         )
 
+    def create_slider_card(title, value_control, accent_color, icon_data, description, min_val, max_val, on_change_handler, initial_value, width=300):
+        icon_container = ft.Container(
+            content=ft.Icon(icon_data, color=accent_color, size=24),
+            padding=10, bgcolor=ft.Colors.with_opacity(0.1, accent_color),
+            border_radius=12,
+        )
+        temp_slider = ft.Slider(
+            min=min_val,
+            max=max_val,
+            value=initial_value,
+            divisions=(max_val - min_val) * 2,
+            label="{value} degrees Celsius",
+            on_change=on_change_handler,
+            active_color=accent_color,
+            inactive_color=ft.Colors.with_opacity(0.3, accent_color),
+            thumb_color=accent_color,
+        )
+        return ft.Card(
+            elevation=CARD_ELEVATION,
+            shadow_color=ft.Colors.with_opacity(0.1, ft.Colors.BLACK),
+            color=CARD_BG,
+            shape=ft.RoundedRectangleBorder(radius=CARD_BORDER_RADIUS),
+            content=ft.Container(
+                padding=20, width=width,
+                content=ft.Column([
+                    ft.Row([
+                        icon_container,
+                        ft.Column([
+                            ft.Text(title, size=16, weight=ft.FontWeight.W_600, color=TEXT_PRIMARY),
+                            ft.Text("Simulated ac, 16-400C", size=12, color=TEXT_SECONDARY)
+                        ], spacing=2),
+                    ], spacing=15),
+                    ft.Container(height=20),
+                    value_control,
+                    #ft.Text(description, size=12, color=TEXT_SECONDARY),
+                    #ft.Container(height=15),
+                    temp_slider,
+                ])
+            )
+        )
+
     # --- Navigation Buttons ---
     nav_btn_style = ft.ButtonStyle(
         color=ft.Colors.WHITE, bgcolor=COLOR_HUM,
@@ -153,6 +203,7 @@ def home_view(page: ft.Page):
     # --- Instantiate Cards ---
     temp_card = create_sensor_card("Temperature", "22.5", "°C", COLOR_TEMP, ft.Icons.THERMOSTAT, "BME280 Sensor | Range: -40 to 80°C")
     humidity_card = create_sensor_card("Humidity", "45", "% RH", COLOR_HUM, ft.Icons.WATER_DROP, "BME280 Sensor | Range: 0-100%")
+
 
     light_status = ft.Text("Status: OFF", size=18, weight=ft.FontWeight.W_600, color=COLOR_DANGER)
     light_button = ft.ElevatedButton("Turn ON", on_click=on_light_click, style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=COLOR_SUCCESS, shape=ft.RoundedRectangleBorder(radius=12)), width=float("inf"))
@@ -183,6 +234,10 @@ def home_view(page: ft.Page):
     window_icon_container = ft.Container(content=window_icon, padding=10, bgcolor=ft.Colors.with_opacity(0.1, COLOR_HUM), border_radius=12)
     window_card = create_interactive_card("Window", window_status, window_icon_container, "Smart Window Controller", window_button)
 
+    target_temp = ft.Text("22.0 Celsius", size=36, weight=ft.FontWeight.W_600, color=COLOR_DANGER)
+    temp_control_card = create_slider_card("Temp control", ft.Row([target_temp]), COLOR_TEMP, ft.Icons.THERMOSTAT_ROUNDED, "simulated ac, 16C-400C", 16.0, 400.0, on_tempslider_change, 22.0)
+
+
 
     section_title_style = ft.TextStyle(size=20, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
     
@@ -191,7 +246,7 @@ def home_view(page: ft.Page):
         nav_row,
         ft.Text("Environmental Sensors", style=section_title_style),
         ft.Container(height=10),
-        ft.Row([temp_card, humidity_card], spacing=20, wrap=True, alignment=ft.MainAxisAlignment.START),
+        ft.Row([temp_card, humidity_card, temp_control_card], spacing=20, wrap=True, alignment=ft.MainAxisAlignment.START),
         ft.Container(height=30),
         ft.Text("Device Control", style=section_title_style),
         ft.Container(height=10),

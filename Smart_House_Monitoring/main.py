@@ -3,6 +3,7 @@ from views.home_view import home_view
 from views.sensor_view import sensor_view
 from views.realdata_view import realtime_data_view
 from views.extras_view import extras_view
+from views.rooms_view import rooms_view
 
 def main(page: ft.Page):
     page.title = "Smart Home Pro"
@@ -23,6 +24,8 @@ def main(page: ft.Page):
             page.views.append(extras_view(page))
         elif page.route == "/realdatas":
             page.views.append(realtime_data_view(page))
+        elif page.route == "/rooms":
+            page.views.append(rooms_view(page))
         page.update()
 
     page.on_route_change = route_change

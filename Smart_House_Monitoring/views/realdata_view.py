@@ -6,44 +6,92 @@ from config import *
 import state
 from components import create_styled_log_table, create_log_row, generate_y_labels
 
+# ==============================================================================
+# --- HELPER: ROBUST DYNAMIC SCALING ---
+# ==============================================================================
+def update_chart_scale(chart, data_points, config):
+    """
+    Recalculates the Y-axis min/max based on the visible data points.
+    Includes a safety margin to prevent the line from hitting the edges.
+    """
+    if not data_points:
+        # Default fallback if no data exists
+        chart.min_y = config["min_y"]
+        chart.max_y = config["max_y"]
+        return
+
+    # 1. Find the absolute min and max in the current dataset
+    y_values = [dp.y for dp in data_points]
+    current_min = min(y_values)
+    current_max = max(y_values)
+
+    # 2. Calculate a margin (10% of the range)
+    diff = current_max - current_min
+    if diff == 0: 
+        # If line is flat (e.g., constant 20°C), creates a virtual margin
+        margin = current_max * 0.1 if current_max != 0 else 10
+    else:
+        margin = diff * 0.1
+
+    # 3. Determine new limits
+    new_min = current_min - margin
+    new_max = current_max + margin
+
+    # 4. Special handling for sensors that shouldn't go below zero (Light, Rain, Hum)
+    # If the configured min is 0, we try to respect that unless data is actually negative.
+    if config["min_y"] == 0 and new_min < 0:
+        new_min = 0
+
+    # 5. Apply to chart
+    chart.min_y = new_min
+    chart.max_y = new_max
+    
+    # 6. Regenerate labels for the Y-axis
+    chart.left_axis.labels = generate_y_labels(new_min, new_max)
+
 def realtime_data_view(page: ft.Page):
     logger.info("Real-time ThingSpeak view loading...")
     
     current_chart_field = "Field1"
     polling_state = {"is_running": False}
     
+    # --- Sensor Configurations ---
     field_configs = {
-        "Field1": {"name": "Temperature", "color": COLOR_TEMP, "icon": ft.Icons.THERMOSTAT, "unit": "°C", "min_y": 10, "max_y": 40},
-        "Field2": {"name": "Humidity", "color": COLOR_HUM, "icon": ft.Icons.WATER_DROP, "unit": "%RH", "min_y": 20, "max_y": 90},
+        "Field1": {"name": "Temperature", "color": COLOR_TEMP, "icon": ft.Icons.THERMOSTAT, "unit": "°C", "min_y": 0, "max_y": 50},
+        "Field2": {"name": "Humidity", "color": COLOR_HUM, "icon": ft.Icons.WATER_DROP, "unit": "%RH", "min_y": 0, "max_y": 100},
         "Field3": {"name": "Soil Moisture", "color": COLOR_SOIL, "icon": ft.Icons.GRASS, "unit": "%", "min_y": 0, "max_y": 100},
-        "Field4": {"name": "Rain", "color": COLOR_RAIN, "icon": ft.Icons.WATER, "unit": "mm", "min_y": 0, "max_y": 10},
+        "Field4": {"name": "Rain", "color": COLOR_RAIN, "icon": ft.Icons.WATER, "unit": "mm", "min_y": 0, "max_y": 20},
         "Field5": {"name": "Fan", "color": COLOR_FAN, "icon": ft.Icons.WIND_POWER, "unit": "RPM", "min_y": 0, "max_y": 2000},
         "Field7": {"name": "Light", "color": COLOR_LIGHT, "icon": ft.Icons.LIGHTBULB, "unit": "lux", "min_y": 0, "max_y": 1000},
     }
 
+    # Text references for fast updates
     txt_refs = {fId: {"val": ft.Text("—", size=28, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY), 
                       "ts": ft.Text("Waiting...", size=11, color=TEXT_SECONDARY)} 
                 for fId in field_configs}
 
+    # --- Interaction Logic ---
     def on_card_clicked(e, field_id):
         nonlocal current_chart_field; current_chart_field = field_id
         config = field_configs[field_id]
-        chart_axis_title.value = f"{config['name']} History"
         
+        # Update Chart visual style
+        chart_axis_title.value = f"{config['name']} History"
         main_chart_series.color = config['color']
         main_chart_series.below_line_bgcolor = ft.Colors.with_opacity(0.2, config['color'])
         
-        main_chart.min_y = config["min_y"]; main_chart.max_y = config["max_y"]
-        main_chart.left_axis.labels = generate_y_labels(config["min_y"], config["max_y"])
-        main_chart_series.data_points = list(state.GLOBAL_THINGSPEAK_HISTORY[field_id])
+        # Load and set data
+        current_data = list(state.GLOBAL_THINGSPEAK_HISTORY[field_id])
+        main_chart_series.data_points = current_data
+        
+        # Force scale update immediately
+        update_chart_scale(main_chart, current_data, config)
         page.update()
 
+    # --- UI Component Creators ---
     def create_sensor_card_ui(field_id):
         config = field_configs[field_id]
         accent = config['color']
-        val_txt = txt_refs[field_id]["val"]
-        ts_txt = txt_refs[field_id]["ts"]
-
         return ft.Card(
             elevation=CARD_ELEVATION, color=CARD_BG, shape=ft.RoundedRectangleBorder(radius=CARD_BORDER_RADIUS),
             content=ft.Container(
@@ -55,48 +103,57 @@ def realtime_data_view(page: ft.Page):
                             ft.Text(f"{config['name']} ({field_id})", size=14, weight=ft.FontWeight.W_600, color=TEXT_SECONDARY)
                         ], spacing=10),
                         ft.Container(height=10),
-                        ft.Row([val_txt, ft.Text(config["unit"], size=14, color=TEXT_SECONDARY)], vertical_alignment=ft.CrossAxisAlignment.END),
+                        ft.Row([txt_refs[field_id]["val"], ft.Text(config["unit"], size=14, color=TEXT_SECONDARY)], vertical_alignment=ft.CrossAxisAlignment.END),
                         ft.Container(height=5),
-                        ts_txt,
+                        txt_refs[field_id]["ts"],
                     ], spacing=0),
             )
         )
 
+    # --- Table Section ---
     table = create_styled_log_table()
-
     table_container = ft.Card(
         elevation=CARD_ELEVATION, color=CARD_BG, shape=ft.RoundedRectangleBorder(radius=CARD_BORDER_RADIUS),
         content=ft.Container(padding=20, content=ft.Column([
             ft.Text("Live Data Log", size=18, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY), 
             ft.Container(height=10), 
-            ft.Column([table], scroll=ft.ScrollMode.AUTO, height=300)
+            ft.Column([table], scroll=ft.ScrollMode.AUTO, height=350)
         ]))
     )
 
+    # --- Chart Section ---
     initial_config = field_configs[current_chart_field]
+    initial_data = list(state.GLOBAL_THINGSPEAK_HISTORY[current_chart_field])
+    
     main_chart_series = ft.LineChartData(
-        data_points=list(state.GLOBAL_THINGSPEAK_HISTORY[current_chart_field]),
+        data_points=initial_data,
         stroke_width=4, color=initial_config['color'], curved=True, stroke_cap_round=True,
         below_line_bgcolor=ft.Colors.with_opacity(0.2, initial_config['color']),
     )
     chart_axis_title = ft.Text(f"{initial_config['name']} History", style=AXIS_TITLE_STYLE)
-    initial_y_labels = generate_y_labels(initial_config["min_y"], initial_config["max_y"])
+    
+    # X-Axis Labels (Static 0-9 for history)
     x_labels = [ft.ChartAxisLabel(value=i, label=ft.Text(str(i), style=LABEL_STYLE)) for i in range(10)]
 
     main_chart = ft.LineChart(
-        data_series=[main_chart_series], min_x=0, max_x=9,
-        min_y=initial_config["min_y"], max_y=initial_config["max_y"],
+        data_series=[main_chart_series],
+        min_x=0, max_x=9,
+        # Initial Min/Max (will be overwritten instantly)
+        min_y=0, max_y=100,
         interactive=True, expand=True,
-        left_axis=ft.ChartAxis(title=chart_axis_title, labels=initial_y_labels, labels_size=40),
+        left_axis=ft.ChartAxis(title=chart_axis_title, labels_size=40),
         bottom_axis=ft.ChartAxis(title=ft.Text("Index", style=AXIS_TITLE_STYLE), labels=x_labels, labels_interval=1),
         bgcolor=CHART_BG_COLOR, border=ft.border.all(0, ft.Colors.TRANSPARENT), tooltip_bgcolor=CARD_BG,
     )
+    # Apply initial scaling
+    update_chart_scale(main_chart, initial_data, initial_config)
     
     chart_card = ft.Card(
         elevation=CARD_ELEVATION, color=CARD_BG, shape=ft.RoundedRectangleBorder(radius=CARD_BORDER_RADIUS),
-        content=ft.Container(content=main_chart, height=450, padding=20)
+        content=ft.Container(content=main_chart, height=500, padding=20)
     )
 
+    # --- Header & Controls ---
     def on_home_click(e): stop_polling(None); page.go("/")
 
     header = ft.Row([
@@ -116,29 +173,43 @@ def realtime_data_view(page: ft.Page):
         content=ft.Container(padding=15, content=ft.Row([ft.Row([start_btn, stop_btn]), ft.Row([status_indicator, status_text], spacing=5)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN))
     )
 
+    # ==========================================================================
+    # --- RESPONSIVE LAYOUT (The Solution for Layout Issues) ---
+    # ==========================================================================
+    
+    # 1. Left Column (Cards + Controls)
     overview_cards = [create_sensor_card_ui(fId) for fId in ["Field1", "Field2", "Field7", "Field3"]]
-
-    overview_section = ft.Column([
+    
+    left_column_content = ft.Column([
         ft.Text("Dashboard Overview", size=18, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
         ft.Container(height=10),
         ft.Column(overview_cards, spacing=15),
         ft.Container(height=20),
         polling_controls,
-        ft.Container(height=20),
-        table_container,
-    ], spacing=0, expand=4)
+    ], spacing=0)
 
-    chart_section = ft.Column([
+    # 2. Right Column (Chart)
+    right_column_content = ft.Column([
         ft.Text("Sensor History Analysis", size=18, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
         ft.Container(height=10),
         chart_card,
-    ], spacing=0, expand=6)
+    ], spacing=0)
+
+    # 3. Responsive Grid
+    # On Mobile (xs): Columns stack (12 width)
+    # On Desktop (xl): Left is 4 (1/3), Right is 8 (2/3)
+    main_grid = ft.ResponsiveRow([
+        ft.Column([left_column_content], col={"xs": 12, "md": 5, "xl": 4}),
+        ft.Column([right_column_content], col={"xs": 12, "md": 7, "xl": 8}),
+    ], spacing=30, run_spacing=30)
 
     main_layout = ft.Column([
         header, ft.Container(height=20),
-        ft.Row([overview_section, ft.Container(width=30), chart_section], expand=True, vertical_alignment=ft.VerticalAlignment.START)
+        main_grid, ft.Container(height=30),
+        table_container,
     ], expand=True)
 
+    # --- Data Logic ---
     def on_message(msg):
         if not isinstance(msg, dict) or msg.get("type") != "sensor": return
         field_id = msg["name"]; value = msg["value"]; ts_raw = msg["ts"]
@@ -146,6 +217,7 @@ def realtime_data_view(page: ft.Page):
         if field_id not in field_configs: return
         config = field_configs[field_id]
 
+        # Update Card Text
         try:
             dt_obj = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
             ts_formatted = dt_obj.strftime("%H:%M:%S")
@@ -154,26 +226,36 @@ def realtime_data_view(page: ft.Page):
         txt_refs[field_id]["val"].value = str(value)
         txt_refs[field_id]["ts"].value = f"Last update: {ts_formatted}"
 
+        # Update History & Chart
         try:
             float_val = float(value)
             target_history = state.GLOBAL_THINGSPEAK_HISTORY[field_id]
             target_history.append(ft.LineChartDataPoint(len(target_history), float_val))
+            
+            # Keep history short (10 points)
             if len(target_history) > 10:
                 target_history.pop(0)
+                # Re-index x values to be 0..9
                 for i, p in enumerate(target_history): p.x = i
+            
+            # If this is the active chart, update it LIVE
             if field_id == current_chart_field:
                 main_chart_series.data_points = list(target_history)
+                # CRITICAL: Recalculate scale immediately
+                update_chart_scale(main_chart, target_history, config)
+
         except (ValueError, TypeError): pass
 
-        row = create_log_row(
-            ts_formatted, config["name"], str(value), config["unit"], config["icon"], config["color"]
-        )
+        # Update Table
+        row = create_log_row(ts_formatted, config["name"], str(value), config["unit"], config["icon"], config["color"])
         table.rows.insert(0, row)
         if len(table.rows) > 50: table.rows.pop()
+        
         if page: page.update()
 
     page.pubsub.subscribe(on_message)
 
+    # --- Polling Loop ---
     async def thingspeak_poller_loop():
         status_text.value = f"Polling API ({POLL_INTERVAL_SECONDS}s)..."; status_indicator.bgcolor = COLOR_WARNING; page.update()
         async with aiohttp.ClientSession() as session:
@@ -201,4 +283,5 @@ def realtime_data_view(page: ft.Page):
 
     start_btn.on_click = start_polling; stop_btn.on_click = stop_polling
 
+    # ScrollMode.ADAPTIVE allows scrolling if content overflows on small screens
     return ft.View(route="/realdatas", controls=[main_layout], bgcolor=BG_COLOR, padding=SECTION_PADDING, scroll=ft.ScrollMode.ADAPTIVE)

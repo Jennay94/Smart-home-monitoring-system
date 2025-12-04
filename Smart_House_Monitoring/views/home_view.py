@@ -153,7 +153,7 @@ def home_view(page: ft.Page):
     )
 
     nav_row = ft.Container(
-        content=ft.Row([go_to_sensors_btn, go_to_real_datas_btn, go_to_extras_btn, go_to_rooms_btn], spacing=15, alignment=ft.MainAxisAlignment.CENTER),
+        content=ft.Row([go_to_sensors_btn, go_to_real_datas_btn, go_to_extras_btn, go_to_rooms_btn], spacing=15, alignment=ft.MainAxisAlignment.CENTER, wrap=True),
         margin=ft.margin.only(bottom=40)
     )
 

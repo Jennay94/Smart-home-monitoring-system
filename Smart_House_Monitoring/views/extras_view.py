@@ -45,7 +45,7 @@ def extras_view(page: ft.Page):
     page.overlay.append(file_picker)
     upload_btn = ft.ElevatedButton("Upload New Photo", icon=ft.Icons.ADD_A_PHOTO, style=ft.ButtonStyle(padding=15, shape=ft.RoundedRectangleBorder(radius=12), bgcolor=COLOR_HUM, color=ft.Colors.WHITE), on_click=lambda _: file_picker.pick_files(allow_multiple=False, file_type=ft.FilePickerFileType.IMAGE))
 
-    gallery_tab = ft.Column([ft.Row([ft.Text("Plant Diary (Gallery)", size=20, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY), upload_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN), ft.Container(height=20), gallery_grid], expand=True)
+    gallery_tab = ft.Column([ft.Row([ft.Text("Gallery", size=20, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY), upload_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN), ft.Container(height=20), gallery_grid], expand=True)
 
     # --- Tab 2: AI Chat ---
     chat_list = ft.ListView(expand=True, spacing=15, padding=20, auto_scroll=True)

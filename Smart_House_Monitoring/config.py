@@ -2,7 +2,7 @@ import flet as ft
 import logging
 
 # --- CONFIGURATION ---
-API_KEY = "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"
+API_KEY = "API KEY_HERE"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL_NAME = "deepseek/deepseek-chat"
 
